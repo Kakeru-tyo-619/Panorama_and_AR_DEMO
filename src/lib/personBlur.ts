@@ -6,6 +6,7 @@
 import { ObjectDetector } from '@mediapipe/tasks-vision';
 import wasmLoaderPath from '@mediapipe/tasks-vision/vision_wasm_internal.js?url';
 import wasmBinaryPath from '@mediapipe/tasks-vision/vision_wasm_internal.wasm?url';
+import { releaseCanvas } from './canvasUtil';
 
 const MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite';
@@ -33,6 +34,13 @@ function getDetector() {
     });
   }
   return detectorP;
+}
+
+/** 検出器を閉じてメモリ（WASM・モデル）を解放する。次に使うときは作り直す（モデルはブラウザのキャッシュから読む） */
+export function closeDetector() {
+  const p = detectorP;
+  detectorP = null;
+  p?.then((d) => d.close()).catch(() => undefined);
 }
 
 /** 同じ人とみなすか：IoU が大きい、または小さい方の枠の大半がもう一方に含まれる（タイルの大きさ違いで枠の大きさが変わるため） */
@@ -93,6 +101,7 @@ export async function detectPersons(
     onProgress?.(`人物検出 ${i + 1}/${tiles.length}`);
     await new Promise((r) => setTimeout(r)); // 画面が固まらないよう間を空ける
   }
+  releaseCanvas(tile);
   return { all: found, persons: nms(found, W) };
 }
 
@@ -112,6 +121,7 @@ function blurRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(small, 0, 0, small.width, small.height, x, y, w, h);
   ctx.restore();
+  releaseCanvas(small);
 }
 
 /** 検出枠を少し広げてぼかす。0°/360°をまたぐ枠は両端に分けて処理する */

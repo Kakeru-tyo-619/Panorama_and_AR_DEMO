@@ -16,6 +16,16 @@ export function ctx2d(c: AnyCanvas): Ctx2D {
   return ctx;
 }
 
+/**
+ * Canvas のメモリをすぐに解放する。iOS Safari は Canvas のメモリを GC まで解放せず、
+ * 合計の上限を超えるとタブごと再読み込みされるため、使い終わった大きな Canvas は 0×0 にしておく。
+ */
+export function releaseCanvas(c: AnyCanvas | null | undefined) {
+  if (!c) return;
+  c.width = 0;
+  c.height = 0;
+}
+
 export function canvasToBlob(c: AnyCanvas, type: string, quality?: number): Promise<Blob> {
   if ('convertToBlob' in c) return c.convertToBlob({ type, quality });
   return new Promise((resolve, reject) =>
