@@ -1,4 +1,4 @@
-import { decodeBlob } from './canvasUtil';
+import { decodeBlob, releaseCanvas } from './canvasUtil';
 import { getImageBlob } from './db';
 import type { PanoramaRecord } from './types';
 
@@ -7,16 +7,17 @@ export type DepthData = { data: Uint8Array; width: number; height: number };
 export type PanoAssets = {
   width: number;
   height: number;
-  /** 360度ビュー用：未撮影の範囲に斜線と「未撮影」を描いたもの */
-  viewCanvas: HTMLCanvasElement;
-  /** AR 用：未撮影の範囲を透明にしたもの */
-  arCanvas: HTMLCanvasElement;
+  /**
+   * パノラマ画像（JPEG のまま）。表示に使う Canvas は 3D 表示を作るときに preparePanoCanvas で用途の分だけ作り、
+   * GPU に送ったら捨てる（大きな Canvas を常に2枚持たないようにするため）
+   */
+  panorama: Blob;
+  coverageMask: string;
   depth: DepthData | null;
   skyColor: [number, number, number];
   groundColor: [number, number, number];
 };
 
-/** coverage_mask から未撮影の範囲（度）を取り出す */
 export function uncoveredRuns(mask: string): [number, number][] {
   const runs: [number, number][] = [];
   let start = -1;
@@ -58,49 +59,17 @@ export async function loadStoredAssets(imageUrl: string, pano: PanoramaRecord, v
 export async function loadPanoAssets(p: PanoSource): Promise<PanoAssets> {
   const img = await decodeBlob(p.panorama);
   const W = img.width, H = img.height;
-  const runs = uncoveredRuns(p.coverageMask);
-
-  const viewCanvas = document.createElement('canvas');
-  viewCanvas.width = W;
-  viewCanvas.height = H;
-  const vctx = viewCanvas.getContext('2d', { willReadFrequently: true })!;
-  vctx.drawImage(img, 0, 0);
-  // 上下の空・地面の色（グラデーション用）。未撮影部分を描く前に取る
-  const skyColor = avgColor(vctx, Math.round(H * 0.02), Math.max(1, Math.round(H * 0.04)), W);
-  const groundColor = avgColor(vctx, Math.round(H * 0.94), Math.max(1, Math.round(H * 0.04)), W);
-
-  for (const [a, b] of runs) {
-    const x0 = (a / 360) * W, x1 = (b / 360) * W;
-    vctx.save();
-    vctx.beginPath();
-    vctx.rect(x0, 0, x1 - x0, H);
-    vctx.clip();
-    vctx.fillStyle = '#3a3f4b';
-    vctx.fillRect(x0, 0, x1 - x0, H);
-    vctx.strokeStyle = '#555c6b';
-    vctx.lineWidth = 14;
-    for (let x = x0 - H; x < x1; x += 48) {
-      vctx.beginPath();
-      vctx.moveTo(x, H);
-      vctx.lineTo(x + H, 0);
-      vctx.stroke();
-    }
-    vctx.fillStyle = '#e8ecf3';
-    vctx.font = `bold ${Math.round(H * 0.06)}px sans-serif`;
-    vctx.textAlign = 'center';
-    vctx.textBaseline = 'middle';
-    const step = Math.max(1, Math.round((x1 - x0) / 500));
-    for (let k = 0; k < step; k++) vctx.fillText('未撮影', x0 + ((k + 0.5) * (x1 - x0)) / step, H / 2);
-    vctx.restore();
-  }
-
-  const arCanvas = document.createElement('canvas');
-  arCanvas.width = W;
-  arCanvas.height = H;
-  const actx = arCanvas.getContext('2d')!;
-  actx.drawImage(img, 0, 0);
-  for (const [a, b] of runs) actx.clearRect((a / 360) * W, 0, ((b - a) / 360) * W, H);
+  // 上下の空・地面の色（グラデーション用）は縮小した画像から求める
+  const sw = Math.min(512, W), sh = Math.max(1, Math.round((H * sw) / W));
+  const small = document.createElement('canvas');
+  small.width = sw;
+  small.height = sh;
+  const sctx = small.getContext('2d', { willReadFrequently: true })!;
+  sctx.drawImage(img, 0, 0, sw, sh);
   if ('close' in img) img.close();
+  const skyColor = avgColor(sctx, Math.round(sh * 0.02), Math.max(1, Math.round(sh * 0.04)), sw);
+  const groundColor = avgColor(sctx, Math.round(sh * 0.94), Math.max(1, Math.round(sh * 0.04)), sw);
+  releaseCanvas(small);
 
   let depth: DepthData | null = null;
   if (p.depthMap) {
@@ -110,13 +79,62 @@ export async function loadPanoAssets(p: PanoSource): Promise<PanoAssets> {
     c.height = dimg.height;
     const ctx = c.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(dimg, 0, 0);
+    if ('close' in dimg) dimg.close();
     const d = ctx.getImageData(0, 0, c.width, c.height).data;
     const g = new Uint8Array(c.width * c.height);
     for (let i = 0; i < g.length; i++) g[i] = d[i * 4];
     depth = { data: g, width: c.width, height: c.height };
+    releaseCanvas(c);
   }
 
-  return { width: W, height: H, viewCanvas, arCanvas, depth, skyColor, groundColor };
+  return { width: W, height: H, panorama: p.panorama, coverageMask: p.coverageMask, depth, skyColor, groundColor };
+}
+
+/**
+ * 表示に使う画像を用途の分だけ作る。
+ * - view（360度ビュー）：未撮影の範囲に斜線と「未撮影」を描く
+ * - ar（AR）：未撮影の範囲を透明にする
+ * 呼び出し側は GPU に送ったら releaseCanvas で捨てる。
+ */
+export async function preparePanoCanvas(a: PanoAssets, purpose: 'view' | 'ar'): Promise<HTMLCanvasElement> {
+  const img = await decodeBlob(a.panorama);
+  const W = img.width, H = img.height;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(img, 0, 0);
+  if ('close' in img) img.close();
+  const runs = uncoveredRuns(a.coverageMask);
+  if (purpose === 'ar') {
+    for (const [s, e] of runs) ctx.clearRect((s / 360) * W, 0, ((e - s) / 360) * W, H);
+    return canvas;
+  }
+  for (const [s, e] of runs) {
+    const x0 = (s / 360) * W, x1 = (e / 360) * W;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, 0, x1 - x0, H);
+    ctx.clip();
+    ctx.fillStyle = '#3a3f4b';
+    ctx.fillRect(x0, 0, x1 - x0, H);
+    ctx.strokeStyle = '#555c6b';
+    ctx.lineWidth = 14;
+    for (let x = x0 - H; x < x1; x += 48) {
+      ctx.beginPath();
+      ctx.moveTo(x, H);
+      ctx.lineTo(x + H, 0);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#e8ecf3';
+    ctx.font = `bold ${Math.round(H * 0.06)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const step = Math.max(1, Math.round((x1 - x0) / 500));
+    for (let k = 0; k < step; k++) ctx.fillText('未撮影', x0 + ((k + 0.5) * (x1 - x0)) / step, H / 2);
+    ctx.restore();
+  }
+  return canvas;
 }
 
 /** 奥行きを (cols×rows) の格子に縮小し、軽くぼかす（メッシュの尖りを防ぐ） */

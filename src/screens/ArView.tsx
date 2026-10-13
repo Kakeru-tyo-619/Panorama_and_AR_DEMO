@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { DEG, focalFromHfov } from '../lib/angles';
 import { CAMERA_CONSTRAINTS, openMockCamera, openRealCamera, type CameraSource } from '../lib/camera';
 import type { PanoAssets } from '../lib/panoAssets';
-import { PANO_VERT, PanoCylinder, makeTexture, releaseRenderer, setCameraPose } from '../lib/panoMesh';
+import { PANO_VERT, PanoCylinder, loadPanoTexture, releaseRenderer, setCameraPose } from '../lib/panoMesh';
 import { orientation, requestOrientationPermission, startSensors } from '../lib/sensors';
 import { isMock, metrics, settings, useStore } from '../lib/store';
 import type { PanoramaRecord } from '../lib/types';
@@ -18,6 +18,7 @@ export function ArView({ assets, panorama, hfov }: Props) {
   const [manual, setManual] = useState(0);
   const [wipe, setWipe] = useState(false);
   const [wipeX, setWipeX] = useState(0.5);
+  const [texState, setTexState] = useState<'loading' | 'ready' | 'error'>('loading');
   const s = useStore(settings);
   const live = useRef({ manual, wipe, wipeX });
   live.current = { manual, wipe, wipeX };
@@ -62,7 +63,6 @@ export function ArView({ assets, panorama, hfov }: Props) {
     const camera = new THREE.PerspectiveCamera(60, 1, 0.05, 100);
 
     const cyl = new PanoCylinder(assets.width, assets.height, 256, 64);
-    const tex = makeTexture(assets.arCanvas, renderer);
     let depthTex: THREE.DataTexture | null = null;
     if (assets.depth) {
       // 画像の上端が v=1 になるよう行を反転して渡す
@@ -77,7 +77,7 @@ export function ArView({ assets, panorama, hfov }: Props) {
       depthTex.needsUpdate = true;
     }
     const uniforms = {
-      map: { value: tex },
+      map: { value: null as THREE.Texture | null },
       depthMap: { value: depthTex },
       hasDepth: { value: depthTex ? 1 : 0 },
       threshold: { value: 0.35 },
@@ -117,6 +117,7 @@ export function ArView({ assets, panorama, hfov }: Props) {
         }`,
     });
     scene.add(new THREE.Mesh(cyl.geometry, mat));
+    const disposeTexture = loadPanoTexture(renderer, assets, 'ar', (t) => (uniforms.map.value = t), setTexState);
 
     const resize = () => {
       const w = host.clientWidth, h = host.clientHeight;
@@ -167,7 +168,7 @@ export function ArView({ assets, panorama, hfov }: Props) {
       ro.disconnect();
       video?.removeEventListener('resize', resize);
       stopSensors();
-      tex.dispose();
+      disposeTexture();
       depthTex?.dispose();
       mat.dispose();
       cyl.geometry.dispose();
@@ -177,6 +178,8 @@ export function ArView({ assets, panorama, hfov }: Props) {
 
   return (
     <div className="ar-root">
+      {cam && texState === 'loading' && <div className="loading-chip">画像を準備中…</div>}
+      {cam && texState === 'error' && <div className="loading-chip warn">画像を表示できませんでした。画面を開き直してください</div>}
       <div className="ar-cam" ref={camHostRef} />
       <div className="ar-gl" ref={hostRef} />
       {wipe && <div className="wipe-line" style={{ left: `${wipeX * 100}%` }} />}

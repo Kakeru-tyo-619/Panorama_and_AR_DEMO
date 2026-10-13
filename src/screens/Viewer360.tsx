@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { DEG, angleDiff } from '../lib/angles';
 import { depthGrid, type PanoAssets } from '../lib/panoAssets';
-import { PANO_VERT, PanoCylinder, makeTexture, releaseRenderer, setCameraPose } from '../lib/panoMesh';
+import { PANO_VERT, PanoCylinder, loadPanoTexture, releaseRenderer, setCameraPose } from '../lib/panoMesh';
 import { orientation, requestOrientationPermission, startSensors } from '../lib/sensors';
 import { metrics, settings, useStore } from '../lib/store';
 
@@ -21,6 +21,7 @@ export function Viewer360({ assets, headingStart, headingCorrection, view }: Pro
   const [mode, setMode] = useState<'drag' | 'gyro'>('drag');
   const [sway, setSway] = useState(false);
   const [permMsg, setPermMsg] = useState('');
+  const [texState, setTexState] = useState<'loading' | 'ready' | 'error'>('loading');
   const modeRef = useRef(mode);
   const swayRef = useRef(sway);
   modeRef.current = mode;
@@ -67,11 +68,10 @@ export function Viewer360({ assets, headingStart, headingCorrection, view }: Pro
     const cyl = new PanoCylinder(assets.width, assets.height);
     const grid = assets.depth ? depthGrid(assets.depth, cyl.segX, cyl.segY + 1) : null;
     cyl.setDepth(grid, settings.get().depthStrength);
-    const tex = makeTexture(assets.viewCanvas, renderer);
     const mat = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
       transparent: true,
-      uniforms: { map: { value: tex }, fade: { value: 0.1 } },
+      uniforms: { map: { value: null as THREE.Texture | null }, fade: { value: 0.1 } },
       vertexShader: PANO_VERT,
       fragmentShader: `
         uniform sampler2D map; uniform float fade; varying vec2 vUv;
@@ -82,6 +82,7 @@ export function Viewer360({ assets, headingStart, headingCorrection, view }: Pro
         }`,
     });
     scene.add(new THREE.Mesh(cyl.geometry, mat));
+    const disposeTexture = loadPanoTexture(renderer, assets, 'view', (t) => (mat.uniforms.map.value = t), setTexState);
     const unsubSettings = settings.subscribe(() => cyl.setDepth(grid, settings.get().depthStrength));
 
     // 見上げ角の制限：円筒の上下の端が見えすぎないように
@@ -185,7 +186,7 @@ export function Viewer360({ assets, headingStart, headingCorrection, view }: Pro
       ro.disconnect();
       unsubSettings();
       stopSensors();
-      tex.dispose();
+      disposeTexture();
       mat.dispose();
       cyl.geometry.dispose();
       sky.geometry.dispose();
@@ -213,6 +214,8 @@ export function Viewer360({ assets, headingStart, headingCorrection, view }: Pro
           <input type="checkbox" checked={sway} onChange={(e) => setSway(e.target.checked)} /> 自動で揺らす
         </label>
       </div>
+      {texState === 'loading' && <div className="loading-chip">画像を準備中…</div>}
+      {texState === 'error' && <div className="viewer-note warn">画像を表示できませんでした。画面を開き直してください</div>}
       {!assets.depth && <div className="viewer-note">奥行きマップがないため平面で表示しています</div>}
       {mode === 'gyro' && o.updatedAt === 0 && <div className="viewer-note">方位センサーの値を待っています…</div>}
       {permMsg && <div className="viewer-note warn">{permMsg}</div>}

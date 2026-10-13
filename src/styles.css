@@ -360,7 +360,7 @@ input[type='text'], select {
 .cand-list label { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .cand-thumb { width: 96px; height: 40px; object-fit: cover; border-radius: 4px; flex: none; }
 .cand-meta { display: flex; flex-direction: column; min-width: 0; }
-.loading-chip { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.7); border-radius: 8px; padding: 6px 12px; font-size: 0.85rem; pointer-events: none; }
+.loading-chip { position: absolute; z-index: 5; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.7); border-radius: 8px; padding: 6px 12px; font-size: 0.85rem; pointer-events: none; }
 .pad { padding: 80px 16px 0; }
 
 /* 前回の処理が途中で止まったときの表示 */

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { DEG } from './angles';
+import { releaseCanvas } from './canvasUtil';
+import { preparePanoCanvas, type PanoAssets } from './panoAssets';
 
 export const BASE_RADIUS = 10; // 「メートル」相当
 
@@ -105,4 +107,52 @@ export function releaseRenderer(renderer: THREE.WebGLRenderer) {
   renderer.dispose();
   renderer.forceContextLoss();
   renderer.domElement.remove();
+}
+
+/**
+ * パノラマのテクスチャを用意する。表示用の画像は用途（360度ビュー / AR）の分だけ作り、
+ * GPU に送り終わったら CPU 側の Canvas はすぐ捨てる。
+ * iOS などで GPU 側の画像が失われた（コンテキストロスト）あとに戻ってきたら、画像を作り直して送り直す。
+ * WebGL2 ではテクスチャの領域が最初の画像の大きさで固定されるため、画像ができるたびに新しいテクスチャを作って onTexture で渡す。
+ */
+export function loadPanoTexture(
+  renderer: THREE.WebGLRenderer,
+  assets: PanoAssets,
+  purpose: 'view' | 'ar',
+  onTexture: (tex: THREE.Texture) => void,
+  onState: (s: 'loading' | 'ready' | 'error') => void,
+) {
+  let alive = true;
+  let current: THREE.Texture | null = null;
+
+  const load = () => {
+    onState('loading');
+    preparePanoCanvas(assets, purpose)
+      .then((canvas) => {
+        if (!alive) return releaseCanvas(canvas);
+        const tex = makeTexture(canvas, renderer);
+        // GPU への転送が終わったら呼ばれる
+        tex.onUpdate = () => {
+          tex.onUpdate = null;
+          releaseCanvas(canvas);
+          if (alive) onState('ready');
+        };
+        current?.dispose();
+        current = tex;
+        onTexture(tex);
+      })
+      .catch((e) => {
+        console.error(e);
+        if (alive) onState('error');
+      });
+  };
+  const onRestored = () => alive && load();
+  renderer.domElement.addEventListener('webglcontextrestored', onRestored);
+  load();
+
+  return () => {
+    alive = false;
+    renderer.domElement.removeEventListener('webglcontextrestored', onRestored);
+    current?.dispose();
+  };
 }
