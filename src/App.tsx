@@ -75,6 +75,7 @@ export function App() {
   }, []);
   const open = useCallback((id: string) => setScreen({ name: 'view', id }), []);
 
+  const openDraft = useCallback((draft: Draft) => setScreen({ name: 'preview', draft }), []);
   const onGenerated = useCallback(async (draft: Draft) => {
     try {
       markStage('下書きの保存');
@@ -101,7 +102,7 @@ export function App() {
   return (
     <>
       {screen.name === 'loading' && <p className="muted center">読み込み中…</p>}
-      {screen.name === 'home' && <Home onCapture={() => setScreen({ name: 'capture' })} onOpen={open} />}
+      {screen.name === 'home' && <Home onCapture={() => setScreen({ name: 'capture' })} onOpen={open} onOpenDraft={openDraft} />}
       {screen.name === 'capture' && <Capture onFinish={onCaptured} onCancel={goHome} />}
       {screen.name === 'generate' && <Generate key={screen.key} job={screen.job} onDone={onGenerated} onCancel={goHome} />}
       {screen.name === 'preview' && (

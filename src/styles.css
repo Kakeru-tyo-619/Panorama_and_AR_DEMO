@@ -366,3 +366,7 @@ input[type='text'], select {
 /* 前回の処理が途中で止まったときの表示 */
 .interrupted { border: 1px solid var(--warn); border-radius: 10px; padding: 10px 12px; display: flex; gap: 8px; align-items: flex-start; font-size: 0.85rem; }
 .interrupted p { margin: 0; flex: 1; }
+
+/* 未投稿の下書き */
+.draft-box { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; font-size: 0.88rem; display: flex; flex-direction: column; gap: 8px; }
+.draft-box p { margin: 0; }

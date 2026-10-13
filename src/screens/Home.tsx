@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Thumb } from '../components/Thumb';
 import { takeInterruptedStage } from '../lib/crashMarker';
-import { deletePost, hasPostedToday, listPosts } from '../lib/db';
+import { deleteDraft, deletePost, hasPostedToday, listDrafts, listPosts } from '../lib/db';
 import { login, logout, session, userName } from '../lib/session';
 import { isMock, settings, useStore } from '../lib/store';
 import { classify, formatJst, SEASONS, TIMES_OF_DAY, toJstIso } from '../lib/time';
 import type { PanoramaPost } from '../lib/types';
+import type { Draft } from './Generate';
 
 const ALL = 'すべて';
 
-export function Home({ onCapture, onOpen }: { onCapture: () => void; onOpen: (id: string) => void }) {
+type Props = { onCapture: () => void; onOpen: (id: string) => void; onOpenDraft: (d: Draft) => void };
+
+export function Home({ onCapture, onOpen, onOpenDraft }: Props) {
   const { user } = useStore(session);
   const { ignoreDailyLimit } = useStore(settings);
   const [items, setItems] = useState<PanoramaPost[] | null>(null);
@@ -61,6 +64,16 @@ export function Home({ onCapture, onOpen }: { onCapture: () => void; onOpen: (id
   };
 
   const [interrupted, setInterrupted] = useState(takeInterruptedStage);
+  // 投稿前に止まった生成結果（下書き）。仕上がり確認画面で落ちても、ここから再開できる
+  const [drafts, setDrafts] = useState<Draft[]>([]);
+  useEffect(() => {
+    listDrafts().then(setDrafts).catch(() => setDrafts([]));
+  }, []);
+  const discardDraft = async (d: Draft) => {
+    if (!confirm('この未投稿のパノラマを破棄しますか？')) return;
+    await deleteDraft(d.shotId);
+    setDrafts((ds) => ds.filter((x) => x.shotId !== d.shotId));
+  };
 
   const blocked = postedToday && !ignoreDailyLimit;
   const startCapture = () => {
@@ -83,6 +96,18 @@ export function Home({ onCapture, onOpen }: { onCapture: () => void; onOpen: (id
           <button className="ghost small" onClick={() => setInterrupted(null)}>閉じる</button>
         </div>
       )}
+      {drafts.map((d) => (
+        <div key={d.shotId} className="draft-box">
+          <p>
+            未投稿のパノラマがあります（{formatJst(toJstIso(new Date(d.capture.captured_at)))} 撮影・{d.coverageDeg}°
+            {d.kind === 'regen' ? '・再生成' : ''}）
+          </p>
+          <div className="row-actions">
+            <button className="primary small" onClick={() => onOpenDraft(d)}>仕上がりを確認する</button>
+            <button className="ghost small" onClick={() => discardDraft(d)}>破棄</button>
+          </div>
+        </div>
+      ))}
       <div className="account">
         {user ? (
           <>
