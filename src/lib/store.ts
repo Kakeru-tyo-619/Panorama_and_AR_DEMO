@@ -43,6 +43,8 @@ export const settings = createStore({
   arOpacity: 0.8,
   speedThreshold: 25,
   parallax: 0.3,
+  nearbyRadiusM: 300, // まとめ表示の候補を探す半径（設計書では未定）
+  ignoreDailyLimit: false, // 検証用：1日1件の制限を無視する
   ...loadSettings(),
 });
 settings.subscribe(() => {
@@ -67,6 +69,8 @@ export const metrics = createStore({
 export const ui = createStore({
   currentPanoramaId: null as string | null,
   regenerateRequest: 0,
+  /** まとめ表示で選んだパノラマ（保存せず、閲覧中のみ有効） */
+  groupIds: [] as string[],
 });
 
 export function isMock(): boolean {

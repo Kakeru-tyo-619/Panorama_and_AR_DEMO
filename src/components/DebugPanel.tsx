@@ -66,6 +66,10 @@ export function DebugPanel() {
       <Range label="AR しきい値" min={0} max={1} step={0.01} value={s.arThreshold} onChange={(v) => settings.set({ arThreshold: v })} />
       <Range label="AR 境目のぼかし" min={0} max={0.3} step={0.01} value={s.arSoftness} onChange={(v) => settings.set({ arSoftness: v })} />
       <Range label="撮影の速度上限 (°/s)" min={5} max={90} step={1} value={s.speedThreshold} onChange={(v) => settings.set({ speedThreshold: v })} />
+      <label className="chk">
+        <input type="checkbox" checked={s.ignoreDailyLimit} onChange={(e) => settings.set({ ignoreDailyLimit: e.target.checked })} />
+        1日1件の投稿制限を無視する（検証用）
+      </label>
     </div>
   );
 }

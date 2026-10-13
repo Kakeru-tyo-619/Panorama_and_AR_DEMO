@@ -267,3 +267,38 @@ export function stitchImages(
 
   return { rgba: out, width: PW, height: PH, coverageMask: mask, gains };
 }
+
+/**
+ * 撮影範囲の始まりがパノラマの左端に来るよう列を回し、左端の方位（heading_start）を返す。
+ * 一周撮れているときは回さない（左端＝北）。合成直後の画像は列 0 が北。
+ */
+export function alignToCoverage(out: StitchOutput): StitchOutput & { headingStart: number } {
+  const mask = out.coverageMask;
+  if (!mask.includes('0') || !mask.includes('1')) return { ...out, headingStart: 0 };
+  // 最も長い未撮影の範囲を探し、その終わり（＝撮影範囲の始まり）を左端にする
+  let best = 0, bestLen = 0;
+  for (let d = 0; d < 360; d++) {
+    if (mask[d] !== '0' || mask[(d + 359) % 360] === '0') continue;
+    let len = 0;
+    while (len < 360 && mask[(d + len) % 360] === '0') len++;
+    if (len > bestLen) {
+      bestLen = len;
+      best = d;
+    }
+  }
+  const shiftDeg = (best + bestLen) % 360;
+  const { width: PW, height: PH, rgba } = out;
+  const shiftPx = Math.round((shiftDeg / 360) * PW);
+  const rotated = new Uint8ClampedArray(rgba.length);
+  for (let r = 0; r < PH; r++) {
+    const row = r * PW * 4;
+    rotated.set(rgba.subarray(row + shiftPx * 4, row + PW * 4), row);
+    rotated.set(rgba.subarray(row, row + shiftPx * 4), row + (PW - shiftPx) * 4);
+  }
+  return {
+    ...out,
+    rgba: rotated,
+    coverageMask: mask.slice(shiftDeg) + mask.slice(0, shiftDeg),
+    headingStart: shiftDeg,
+  };
+}

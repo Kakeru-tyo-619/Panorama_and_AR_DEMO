@@ -1,19 +1,42 @@
 import { useEffect, useRef, useState } from 'react';
-import { getLog, getPanorama, getRawShots, putLog, putPanorama, putRawShots } from '../lib/db';
+import { getLog, getPost, getRawShots } from '../lib/db';
 import { estimateDepth } from '../lib/depthClient';
+import { finishPanorama, type FinishResult } from '../lib/panoFinish';
 import { stitch } from '../lib/stitchClient';
 import { metrics, settings } from '../lib/store';
-import { type CaptureResult, type Panorama, type Shot, uuid } from '../lib/types';
+import type { CaptureLogRecord, CaptureResult, PanoramaPost, Shot } from '../lib/types';
+import { uuid } from '../lib/types';
 
 export type GenerateJob = { kind: 'new'; capture: CaptureResult } | { kind: 'regen'; id: string };
 
+/** 生成した結果（まだ保存していない）。仕上がり確認画面で投稿すると保存される */
+export type Draft = {
+  kind: 'new' | 'regen';
+  shotId: string;
+  shots: Shot[];
+  capture: Pick<CaptureResult, 'shot_count' | 'duration_ms' | 'retry_count' | 'device_info' | 'latitude' | 'longitude' | 'captured_at'>;
+  /** 再生成のときの元の投稿 */
+  existing: { post: PanoramaPost; log: CaptureLogRecord | undefined } | null;
+  headingStart: number;
+  coverageMask: string;
+  coverageDeg: number;
+  width: number;
+  height: number;
+  images: Pick<FinishResult, 'full' | 'low' | 'thumb' | 'persons' | 'detectError'>;
+  depthBlob: Blob | null;
+  depthError: string | null;
+  stitchMs: number;
+  depthMs: number;
+  hfov: number;
+};
+
 type StageState = { label: string; detail?: string; state: 'wait' | 'run' | 'done' | 'error'; ms?: number };
 
-export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: (id: string) => void; onCancel: () => void }) {
+export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: (d: Draft) => void; onCancel: () => void }) {
   const [stages, setStages] = useState<StageState[]>([
     { label: 'パノラマ合成中', state: 'wait' },
+    { label: '人物検出・ぼかし', state: 'wait' },
     { label: '奥行き推定中', state: 'wait' },
-    { label: '保存', state: 'wait' },
   ]);
   const [modelPct, setModelPct] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -34,38 +57,32 @@ export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: 
     started.current = true;
     (async () => {
       const hfov = settings.get().hfov;
-      let id: string;
+      let shotId: string;
       let shots: Shot[];
-      let base: Omit<Panorama, 'panoramaBlob' | 'depthMapBlob' | 'thumbnailBlob' | 'coverage_mask'>;
-      let logBase: { device_info: string; shot_count: number; duration_ms: number; retry_count: number };
+      let capture: Draft['capture'];
+      let existing: Draft['existing'] = null;
       if (job.kind === 'new') {
-        const c = job.capture;
-        id = uuid();
-        shots = c.shots;
-        const d = new Date(c.captured_at);
-        base = {
-          id,
-          latitude: c.latitude,
-          longitude: c.longitude,
-          captured_at: c.captured_at,
-          captured_month: d.getMonth() + 1,
-          heading_start: 0,
-          coverage_deg: c.shot_count * 30,
-          heading_correction: null,
-          created_at: new Date().toISOString(),
-        };
-        logBase = { device_info: c.device_info, shot_count: c.shot_count, duration_ms: c.duration_ms, retry_count: c.retry_count };
+        shotId = uuid();
+        shots = job.capture.shots;
+        capture = job.capture;
       } else {
-        id = job.id;
-        const [p, log, raw] = await Promise.all([getPanorama(id), getLog(id), getRawShots(id)]);
-        if (!p || !log || !raw) throw new Error('再生成に必要な元写真が見つかりません');
+        shotId = job.id;
+        const [post, log, raw] = await Promise.all([getPost(shotId), getLog(shotId), getRawShots(shotId)]);
+        if (!post || !raw) throw new Error('再生成に必要な元写真が見つかりません');
         shots = raw.shots;
-        const { panoramaBlob: _a, depthMapBlob: _b, thumbnailBlob: _c, coverage_mask: _d, ...rest } = p;
-        base = rest;
-        logBase = log;
+        existing = { post, log };
+        capture = {
+          shot_count: log?.shot_count ?? shots.length,
+          duration_ms: log?.duration_ms ?? 0,
+          retry_count: log?.retry_count ?? 0,
+          device_info: log?.device_info ?? '',
+          latitude: post.shot.latitude,
+          longitude: post.shot.longitude,
+          captured_at: post.pano.captured_at,
+        };
       }
 
-      // 1) パノラマ合成
+      // 1) パノラマ合成（傾き補正 / 境目のぼかし / 明るさ補正）
       update(0, { state: 'run', detail: `横画角 ${hfov}°` });
       const t1 = performance.now();
       const st = await stitch({ shots: shots.map(({ blob, heading, pitch, roll }) => ({ blob, heading, pitch, roll })), hfov }, (msg) =>
@@ -75,45 +92,60 @@ export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: 
       metrics.set({ stitchMs });
       update(0, { state: 'done', ms: stitchMs, detail: `${st.width}×${st.height}px（${st.where === 'worker' ? 'Worker' : 'メインスレッド'}）` });
 
-      // 2) 奥行き推定（失敗しても奥行きなしで保存する）
-      update(1, { state: 'run', detail: 'モデル読み込み中' });
+      // 2) 人物検出・ぼかし → 配信用の画像
+      update(1, { state: 'run', detail: '準備中' });
       const t2 = performance.now();
+      const fin = await finishPanorama(st.panoramaBlob, (msg) => update(1, { detail: msg }));
+      update(1, {
+        state: fin.detectError ? 'error' : 'done',
+        ms: Math.round(performance.now() - t2),
+        detail: fin.detectError ? `人物検出に失敗（ぼかしなし）: ${fin.detectError}` : `${fin.persons.length}人を検出してぼかしました`,
+      });
+
+      // 3) 奥行き推定（投稿時に1回。失敗しても奥行きなしで続ける）
+      update(2, { state: 'run', detail: 'モデル読み込み中' });
+      const t3 = performance.now();
       let depthBlob: Blob | null = null;
-      let depthMs = 0;
+      let depthError: string | null = null;
       try {
-        const res = await estimateDepth(st.depthInput, st.coverageMask, (e) => {
+        const res = await estimateDepth(fin.depthInput, st.coverageMask, (e) => {
           if (e.type === 'model') {
             setModelPct(e.progress);
-            update(1, { detail: `モデル読み込み中 ${Math.round(e.progress)}%（初回は数十MBをダウンロード）` });
+            update(2, { detail: `モデル読み込み中 ${Math.round(e.progress)}%（初回は数十MBをダウンロード）` });
           } else if (e.type === 'ready') {
             setModelPct(null);
-            update(1, { detail: `モデル準備完了：${e.backend}` });
+            update(2, { detail: `モデル準備完了：${e.backend}` });
           } else if (e.type === 'tile') {
-            update(1, { detail: `${e.index + 1}/${e.total} 枚目のタイル` });
+            update(2, { detail: `${e.index + 1}/${e.total} 枚目のタイル` });
           }
         });
         depthBlob = res.blob;
-        depthMs = Math.round(performance.now() - t2);
-        metrics.set({ depthMs });
-        update(1, { state: 'done', ms: depthMs, detail: res.backend });
+        update(2, { state: 'done', ms: Math.round(performance.now() - t3), detail: res.backend });
       } catch (e) {
-        depthMs = Math.round(performance.now() - t2);
-        update(1, { state: 'error', ms: depthMs, detail: `失敗（奥行きなしで保存します）: ${(e as Error).message}` });
+        depthError = (e as Error).message;
+        update(2, { state: 'error', ms: Math.round(performance.now() - t3), detail: `失敗（平面で表示します）: ${depthError}` });
       }
+      const depthMs = Math.round(performance.now() - t3);
+      metrics.set({ depthMs });
 
-      // 3) 保存
-      update(2, { state: 'run' });
-      await putPanorama({
-        ...base,
-        panoramaBlob: st.panoramaBlob,
-        depthMapBlob: depthBlob,
-        thumbnailBlob: st.thumbnailBlob,
-        coverage_mask: st.coverageMask,
+      onDone({
+        kind: job.kind,
+        shotId,
+        shots,
+        capture,
+        existing,
+        headingStart: st.headingStart,
+        coverageMask: st.coverageMask,
+        coverageDeg: [...st.coverageMask].filter((c) => c === '1').length,
+        width: st.width,
+        height: st.height,
+        images: { full: fin.full, low: fin.low, thumb: fin.thumb, persons: fin.persons, detectError: fin.detectError },
+        depthBlob,
+        depthError,
+        stitchMs,
+        depthMs,
+        hfov,
       });
-      await putLog({ panorama_id: id, ...logBase, stitch_ms: stitchMs, depth_ms: depthMs, hfov_deg: hfov });
-      if (job.kind === 'new') await putRawShots({ panorama_id: id, shots });
-      update(2, { state: 'done' });
-      setTimeout(() => onDone(id), 600);
     })().catch((e) => {
       console.error(e);
       setError(String((e as Error).message ?? e));
@@ -134,7 +166,7 @@ export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: 
                 {s.ms != null && <span className="ms"> {s.ms.toLocaleString()} ms</span>}
               </div>
               {s.detail && <div className="detail">{s.detail}</div>}
-              {i === 1 && modelPct != null && (
+              {i === 2 && modelPct != null && (
                 <div className="progress">
                   <div style={{ width: `${modelPct}%` }} />
                 </div>

@@ -1,5 +1,6 @@
 import { decodeBlob } from './canvasUtil';
-import type { Panorama } from './types';
+import { getImageBlob } from './db';
+import type { PanoramaRecord } from './types';
 
 export type DepthData = { data: Uint8Array; width: number; height: number };
 
@@ -42,10 +43,22 @@ function avgColor(ctx: CanvasRenderingContext2D, y: number, h: number, w: number
   return [r / n / 255, g / n / 255, b / n / 255];
 }
 
-export async function loadPanoAssets(p: Panorama): Promise<PanoAssets> {
-  const img = await decodeBlob(p.panoramaBlob);
+export type PanoSource = { panorama: Blob; depthMap: Blob | null; coverageMask: string };
+
+/** 保存済みの投稿から読み込む。AR は高解像度、360度ビューは低解像度を使う（本番の Cloudinary の配信に合わせる） */
+export async function loadStoredAssets(imageUrl: string, pano: PanoramaRecord, variant: 'full' | 'low'): Promise<PanoAssets> {
+  const [panorama, depthMap] = await Promise.all([
+    getImageBlob(imageUrl, variant),
+    pano.depth_map_url ? getImageBlob(pano.depth_map_url) : Promise.resolve(null),
+  ]);
+  if (!panorama) throw new Error('パノラマ画像が見つかりません');
+  return loadPanoAssets({ panorama, depthMap, coverageMask: pano.coverage_mask });
+}
+
+export async function loadPanoAssets(p: PanoSource): Promise<PanoAssets> {
+  const img = await decodeBlob(p.panorama);
   const W = img.width, H = img.height;
-  const runs = uncoveredRuns(p.coverage_mask);
+  const runs = uncoveredRuns(p.coverageMask);
 
   const viewCanvas = document.createElement('canvas');
   viewCanvas.width = W;
@@ -90,8 +103,8 @@ export async function loadPanoAssets(p: Panorama): Promise<PanoAssets> {
   if ('close' in img) img.close();
 
   let depth: DepthData | null = null;
-  if (p.depthMapBlob) {
-    const dimg = await decodeBlob(p.depthMapBlob);
+  if (p.depthMap) {
+    const dimg = await decodeBlob(p.depthMap);
     const c = document.createElement('canvas');
     c.width = dimg.width;
     c.height = dimg.height;

@@ -8,7 +8,15 @@ import { metrics, settings, useStore } from '../lib/store';
 
 const FOV = 70;
 
-export function Viewer360({ assets, headingStart }: { assets: PanoAssets; headingStart: number }) {
+type Props = {
+  assets: PanoAssets;
+  headingStart: number;
+  headingCorrection?: number | null;
+  /** 見ている方位（北基準）。パノラマを切り替えても同じ方向を向いたままにするために共有する */
+  view?: { current: { heading: number; pitch: number } };
+};
+
+export function Viewer360({ assets, headingStart, headingCorrection, view }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<'drag' | 'gyro'>('drag');
   const [sway, setSway] = useState(false);
@@ -79,7 +87,17 @@ export function Viewer360({ assets, headingStart }: { assets: PanoAssets; headin
     // 見上げ角の制限：円筒の上下の端が見えすぎないように
     const maxPitch = Math.max(5, cyl.maxElevationDeg() - FOV / 2 + 10);
 
-    const state = { yaw: 0, pitch: 0, dragX: 0, dragging: false, lat: 0, vert: 0, base: null as null | { p: number; r: number } };
+    // 画像上の向き（yaw）= 北基準の方位 − heading_start + heading_correction
+    const offset = headingStart - (headingCorrection ?? 0);
+    const state = {
+      yaw: view ? view.current.heading - offset : 0,
+      pitch: view ? Math.max(-maxPitch, Math.min(maxPitch, view.current.pitch)) : 0,
+      dragX: 0,
+      dragging: false,
+      lat: 0,
+      vert: 0,
+      base: null as null | { p: number; r: number },
+    };
     let lastX = 0, lastY = 0;
     const el = renderer.domElement;
     const down = (e: PointerEvent) => {
@@ -128,7 +146,7 @@ export function Viewer360({ assets, headingStart }: { assets: PanoAssets; headin
       let roll = 0;
       let latTarget = 0, vertTarget = 0;
       if (modeRef.current === 'gyro' && hasSensor) {
-        state.yaw = ori.heading - headingStart;
+        state.yaw = ori.heading - offset;
         state.pitch = Math.max(-maxPitch, Math.min(maxPitch, ori.pitch));
         roll = ori.roll;
         latTarget = Math.max(-1, Math.min(1, ori.roll / 25)) * P;
@@ -145,6 +163,7 @@ export function Viewer360({ assets, headingStart }: { assets: PanoAssets; headin
       state.vert += (vertTarget - state.vert) * 0.15;
 
       setCameraPose(camera, state.yaw, state.pitch, roll);
+      if (view) view.current = { heading: state.yaw + offset, pitch: state.pitch };
       // 中心から少しだけ動かして視差を出す：前方（腕の長さ相当）+ 左右 + 上下
       const y = state.yaw * DEG, p = state.pitch * DEG;
       const fwd = new THREE.Vector3(Math.sin(y) * Math.cos(p), Math.sin(p), -Math.cos(y) * Math.cos(p));
@@ -172,7 +191,7 @@ export function Viewer360({ assets, headingStart }: { assets: PanoAssets; headin
       renderer.dispose();
       el.remove();
     };
-  }, [assets, headingStart]);
+  }, [assets, headingStart, headingCorrection, view]);
 
   const toggleGyro = async () => {
     if (mode === 'gyro') return setMode('drag');

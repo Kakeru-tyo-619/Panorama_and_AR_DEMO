@@ -6,9 +6,9 @@ import type { PanoAssets } from '../lib/panoAssets';
 import { PANO_VERT, PanoCylinder, makeTexture, setCameraPose } from '../lib/panoMesh';
 import { orientation, requestOrientationPermission, startSensors } from '../lib/sensors';
 import { isMock, metrics, settings, useStore } from '../lib/store';
-import type { Panorama } from '../lib/types';
+import type { PanoramaRecord } from '../lib/types';
 
-type Props = { assets: PanoAssets; panorama: Panorama; hfov: number };
+type Props = { assets: PanoAssets; panorama: Pick<PanoramaRecord, 'heading_start' | 'heading_correction'>; hfov: number };
 
 export function ArView({ assets, panorama, hfov }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
