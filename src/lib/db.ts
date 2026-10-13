@@ -56,6 +56,40 @@ async function store(name: (typeof STORES)[number] | 'drafts', mode: IDBTransact
   return db.transaction(name, mode).objectStore(name);
 }
 
+/**
+ * Blob の中身を複製した新しい Blob を返す。
+ * iOS Safari（WebKit）では、IndexedDB から読み出した Blob をそのまま別のレコードに保存し、元のレコードを消すと、
+ * 保存した側も読めなくなる（画像の読み込みが「Loading error.」で失敗する）ことがあるため、保存前に中身を複製して切り離す。
+ */
+async function ownBlob(b: Blob): Promise<Blob> {
+  return new Blob([await b.arrayBuffer()], { type: b.type });
+}
+
+async function ownImage(r: ImageRecord): Promise<ImageRecord> {
+  return {
+    ...r,
+    full: await ownBlob(r.full),
+    low: r.low ? await ownBlob(r.low) : r.low,
+    thumb: r.thumb ? await ownBlob(r.thumb) : r.thumb,
+  };
+}
+
+async function ownShots<T extends { blob: Blob }>(shots: T[]): Promise<T[]> {
+  const out: T[] = [];
+  for (const s of shots) out.push({ ...s, blob: await ownBlob(s.blob) });
+  return out;
+}
+
+/** 保存する画像をすべて複製する（トランザクションの中で await すると自動で閉じるため、先に済ませる） */
+async function ownBundle<B extends Omit<PostBundle, 'raw'> & { raw?: RawShots | null }>(b: B): Promise<B> {
+  return {
+    ...b,
+    image: await ownImage(b.image),
+    depth: b.depth ? await ownImage(b.depth) : null,
+    raw: b.raw ? { ...b.raw, shots: await ownShots(b.raw.shots) } : b.raw,
+  };
+}
+
 /** 画像の URL（Cloudinary の URL の代わり） */
 export const imageUrl = (shotId: string, kind: 'panorama' | 'depth') => `local://images/${shotId}/${kind}`;
 
@@ -78,7 +112,8 @@ function isSameDayPanorama(s: ShotRecord, createdAt: string) {
  * 投稿を登録する。パノラマ/ARの投稿は 1日1件（JST 午前0時にリセット、写真とは別に数える）。
  * 確認と書き込みを1つのトランザクションで行い、同時に2件登録されないようにする。
  */
-export async function createPost(b: PostBundle, enforceDailyLimit: boolean) {
+export async function createPost(bundle: PostBundle, enforceDailyLimit: boolean) {
+  const b = await ownBundle(bundle);
   const db = await open();
   const tx = db.transaction([...STORES], 'readwrite');
   let failure: Error | null = null;
@@ -105,7 +140,8 @@ export async function createPost(b: PostBundle, enforceDailyLimit: boolean) {
 }
 
 /** 再生成した画像で上書きする（投稿数には数えない） */
-export async function updatePost(b: Omit<PostBundle, 'raw'>) {
+export async function updatePost(bundle: Omit<PostBundle, 'raw'>) {
+  const b = await ownBundle(bundle);
   const db = await open();
   const tx = db.transaction([...STORES], 'readwrite');
   const done = txDone(tx, () => null);
@@ -181,7 +217,13 @@ export async function deletePost(id: string) {
 // ---- 下書き（生成結果を投稿前に一時保存する。投稿数には数えない） ----
 
 export async function saveDraft(d: Draft) {
-  await wrap((await store('drafts', 'readwrite')).put(d));
+  const owned: Draft = {
+    ...d,
+    shots: await ownShots(d.shots),
+    images: { ...d.images, full: await ownBlob(d.images.full), low: await ownBlob(d.images.low), thumb: await ownBlob(d.images.thumb) },
+    depthBlob: d.depthBlob ? await ownBlob(d.depthBlob) : null,
+  };
+  await wrap((await store('drafts', 'readwrite')).put(owned));
 }
 
 export async function getDraft(shotId: string): Promise<Draft | undefined> {
