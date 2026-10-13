@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { clearStage, markStage } from '../lib/crashMarker';
 import { getLog, getPost, getRawShots } from '../lib/db';
 import { estimateDepth } from '../lib/depthClient';
 import { finishPanorama, type FinishResult } from '../lib/panoFinish';
@@ -83,6 +84,7 @@ export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: 
       }
 
       // 1) パノラマ合成（傾き補正 / 境目のぼかし / 明るさ補正）
+      markStage('パノラマ合成');
       update(0, { state: 'run', detail: `横画角 ${hfov}°` });
       const t1 = performance.now();
       const st = await stitch({ shots: shots.map(({ blob, heading, pitch, roll }) => ({ blob, heading, pitch, roll })), hfov }, (msg) =>
@@ -93,6 +95,7 @@ export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: 
       update(0, { state: 'done', ms: stitchMs, detail: `${st.width}×${st.height}px（${st.where === 'worker' ? 'Worker' : 'メインスレッド'}）` });
 
       // 2) 人物検出・ぼかし → 配信用の画像
+      markStage('人物検出・ぼかし');
       update(1, { state: 'run', detail: '準備中' });
       const t2 = performance.now();
       const fin = await finishPanorama(st.panoramaBlob, (msg) => update(1, { detail: msg }));
@@ -103,6 +106,7 @@ export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: 
       });
 
       // 3) 奥行き推定（投稿時に1回。失敗しても奥行きなしで続ける）
+      markStage('奥行き推定', 'モデル読み込み');
       update(2, { state: 'run', detail: 'モデル読み込み中' });
       const t3 = performance.now();
       let depthBlob: Blob | null = null;
@@ -116,6 +120,7 @@ export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: 
             setModelPct(null);
             update(2, { detail: `モデル準備完了：${e.backend}` });
           } else if (e.type === 'tile') {
+            markStage('奥行き推定', `${e.index + 1}/${e.total} 枚目のタイル`);
             update(2, { detail: `${e.index + 1}/${e.total} 枚目のタイル` });
           }
         });
@@ -127,6 +132,8 @@ export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: 
       }
       const depthMs = Math.round(performance.now() - t3);
       metrics.set({ depthMs });
+      // 仕上がり確認画面（3D 表示の準備）に移る。表示が始まったら Preview 側で記録を消す
+      markStage('仕上がり確認画面の表示');
 
       onDone({
         kind: job.kind,
@@ -147,6 +154,7 @@ export function Generate({ job, onDone, onCancel }: { job: GenerateJob; onDone: 
         hfov,
       });
     })().catch((e) => {
+      clearStage();
       console.error(e);
       setError(String((e as Error).message ?? e));
       setStages((s) => s.map((st) => (st.state === 'run' ? { ...st, state: 'error' } : st)));

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { clearStage } from '../lib/crashMarker';
 import { createPost, DailyLimitError, imageUrl, updatePost, type PostBundle } from '../lib/db';
 import { loadPanoAssets, type PanoAssets } from '../lib/panoAssets';
 import { session } from '../lib/session';
@@ -23,10 +24,17 @@ export function Preview({ draft, onPosted, onRetake, onDiscard }: Props) {
   const flatUrl = useMemo(() => URL.createObjectURL(draft.images.low), [draft]);
 
   useEffect(() => () => URL.revokeObjectURL(flatUrl), [flatUrl]);
+  // 画面を離れた（投稿・破棄・撮り直し）なら途中終了ではない
+  useEffect(() => clearStage, []);
   useEffect(() => {
     let alive = true;
     loadPanoAssets({ panorama: draft.images.low, depthMap: draft.depthBlob, coverageMask: draft.coverageMask })
-      .then((a) => alive && setAssets(a))
+      .then((a) => {
+        if (!alive) return;
+        setAssets(a);
+        // 3D 表示が始まって少し経っても落ちなければ、生成は最後まで終わったとみなす
+        setTimeout(clearStage, 3000);
+      })
       .catch((e) => setError(String(e.message ?? e)));
     return () => {
       alive = false;

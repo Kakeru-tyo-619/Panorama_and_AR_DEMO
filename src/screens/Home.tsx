@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Thumb } from '../components/Thumb';
+import { takeInterruptedStage } from '../lib/crashMarker';
 import { deletePost, hasPostedToday, listPosts } from '../lib/db';
 import { login, logout, session, userName } from '../lib/session';
 import { isMock, settings, useStore } from '../lib/store';
@@ -59,6 +60,8 @@ export function Home({ onCapture, onOpen }: { onCapture: () => void; onOpen: (id
     }
   };
 
+  const [interrupted, setInterrupted] = useState(takeInterruptedStage);
+
   const blocked = postedToday && !ignoreDailyLimit;
   const startCapture = () => {
     if (!user) return setShowLogin(true);
@@ -71,6 +74,15 @@ export function Home({ onCapture, onOpen }: { onCapture: () => void; onOpen: (id
         <h1>Irisona AR &amp; Panorama <small>デモ</small></h1>
         {isMock() && <span className="badge">モックモード</span>}
       </header>
+      {interrupted && (
+        <div className="interrupted warn">
+          <p>
+            前回は「{interrupted.stage}{interrupted.detail ? `（${interrupted.detail}）` : ''}」の途中でページが読み直されました
+            （{new Date(interrupted.at).toLocaleTimeString('ja-JP')}）。メモリ不足でブラウザが処理を止めた可能性があります。
+          </p>
+          <button className="ghost small" onClick={() => setInterrupted(null)}>閉じる</button>
+        </div>
+      )}
       <div className="account">
         {user ? (
           <>
