@@ -6,13 +6,7 @@ export type DepthEvent =
   | { type: 'tile'; index: number; total: number }
   | { type: 'log'; message: string };
 
-let worker: Worker | null = null;
 let seq = 0;
-
-function getWorker() {
-  if (!worker) worker = new Worker(new URL('../workers/depth.worker.ts', import.meta.url), { type: 'module' });
-  return worker;
-}
 
 export function estimateDepth(
   input: { data: Uint8ClampedArray; width: number; height: number },
@@ -20,7 +14,10 @@ export function estimateDepth(
   onEvent: (e: DepthEvent) => void,
 ): Promise<{ blob: Blob; backend: string }> {
   const id = ++seq;
-  const w = getWorker();
+  // 1回ごとに Worker を作り、終わったら終了する。モデル（ONNX Runtime・WebGPU）のメモリを確実に解放して、
+  // 直後に開く 3D 表示（WebGL）とメモリを取り合わないようにする（iOS Safari はメモリ不足でタブごと再読み込みされる）。
+  // 2回目以降のモデルはブラウザのキャッシュから読むので、作り直しても数秒で済む。
+  const w = new Worker(new URL('../workers/depth.worker.ts', import.meta.url), { type: 'module' });
   return new Promise((resolve, reject) => {
     const onMsg = (e: MessageEvent) => {
       const m = e.data;
@@ -45,14 +42,14 @@ export function estimateDepth(
     const onErr = (e: ErrorEvent) => {
       console.error('depth worker error', e.message, e.filename, e.lineno, e.error);
       cleanup();
-      worker?.terminate();
-      worker = null;
       metrics.set({ modelStatus: `Worker エラー` });
       reject(new Error(e.message || 'depth worker error'));
     };
     const cleanup = () => {
       w.removeEventListener('message', onMsg);
       w.removeEventListener('error', onErr);
+      w.terminate();
+      metrics.set({ modelStatus: '解放済み（次回はキャッシュから読み込み）' });
     };
     w.addEventListener('message', onMsg);
     w.addEventListener('error', onErr);
