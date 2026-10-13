@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { DEG, angleDiff } from '../lib/angles';
 import { depthGrid, type PanoAssets } from '../lib/panoAssets';
-import { PANO_VERT, PanoCylinder, makeTexture, setCameraPose } from '../lib/panoMesh';
+import { PANO_VERT, PanoCylinder, makeTexture, releaseRenderer, setCameraPose } from '../lib/panoMesh';
 import { orientation, requestOrientationPermission, startSensors } from '../lib/sensors';
 import { metrics, settings, useStore } from '../lib/store';
 
@@ -188,8 +188,9 @@ export function Viewer360({ assets, headingStart, headingCorrection, view }: Pro
       tex.dispose();
       mat.dispose();
       cyl.geometry.dispose();
-      renderer.dispose();
-      el.remove();
+      sky.geometry.dispose();
+      sky.material.dispose();
+      releaseRenderer(renderer);
     };
   }, [assets, headingStart, headingCorrection, view]);
 

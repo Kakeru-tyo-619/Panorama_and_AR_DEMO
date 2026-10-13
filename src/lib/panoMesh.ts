@@ -96,3 +96,13 @@ export function setCameraPose(cam: THREE.Camera, yaw: number, pitch: number, rol
   cam.rotation.order = 'YXZ';
   cam.rotation.set(pitch * DEG, -yaw * DEG, -roll * DEG);
 }
+
+/**
+ * 3D 表示を閉じるときの片付け。renderer.dispose() だけでは WebGL のコンテキスト（GPU のメモリ）が残り、
+ * iOS Safari では画面を開き直すたびに積み重なってメモリ不足になるため、forceContextLoss() で確実に手放す。
+ */
+export function releaseRenderer(renderer: THREE.WebGLRenderer) {
+  renderer.dispose();
+  renderer.forceContextLoss();
+  renderer.domElement.remove();
+}

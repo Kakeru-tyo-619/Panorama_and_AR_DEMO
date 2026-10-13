@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { DEG, focalFromHfov } from '../lib/angles';
 import { CAMERA_CONSTRAINTS, openMockCamera, openRealCamera, type CameraSource } from '../lib/camera';
 import type { PanoAssets } from '../lib/panoAssets';
-import { PANO_VERT, PanoCylinder, makeTexture, setCameraPose } from '../lib/panoMesh';
+import { PANO_VERT, PanoCylinder, makeTexture, releaseRenderer, setCameraPose } from '../lib/panoMesh';
 import { orientation, requestOrientationPermission, startSensors } from '../lib/sensors';
 import { isMock, metrics, settings, useStore } from '../lib/store';
 import type { PanoramaRecord } from '../lib/types';
@@ -171,8 +171,7 @@ export function ArView({ assets, panorama, hfov }: Props) {
       depthTex?.dispose();
       mat.dispose();
       cyl.geometry.dispose();
-      renderer.dispose();
-      renderer.domElement.remove();
+      releaseRenderer(renderer);
     };
   }, [cam, assets, panorama, hfov]);
 
