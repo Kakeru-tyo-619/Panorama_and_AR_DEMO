@@ -56,8 +56,17 @@ export async function loadStoredAssets(imageUrl: string, pano: PanoramaRecord, v
   return loadPanoAssets({ panorama, depthMap, coverageMask: pano.coverage_mask });
 }
 
+/** 画像の読み込みに失敗したとき、どの画像か・大きさ・形式をエラー文に入れる（原因の切り分け用） */
+async function decodeLabeled(blob: Blob, label: string) {
+  try {
+    return await decodeBlob(blob);
+  } catch (e) {
+    throw new Error(`${label}を読み込めません（${blob.size.toLocaleString()} バイト, ${blob.type || '形式不明'}）: ${(e as Error)?.message ?? e}`);
+  }
+}
+
 export async function loadPanoAssets(p: PanoSource): Promise<PanoAssets> {
-  const img = await decodeBlob(p.panorama);
+  const img = await decodeLabeled(p.panorama, 'パノラマ画像');
   const W = img.width, H = img.height;
   // 上下の空・地面の色（グラデーション用）は縮小した画像から求める
   const sw = Math.min(512, W), sh = Math.max(1, Math.round((H * sw) / W));
@@ -72,8 +81,9 @@ export async function loadPanoAssets(p: PanoSource): Promise<PanoAssets> {
   releaseCanvas(small);
 
   let depth: DepthData | null = null;
-  if (p.depthMap) {
-    const dimg = await decodeBlob(p.depthMap);
+  // 奥行きマップだけが読めない場合は、エラーで止めずに平面で表示する
+  const dimg = p.depthMap ? await decodeLabeled(p.depthMap, '奥行きマップ').catch((e) => (console.warn(e), null)) : null;
+  if (dimg) {
     const c = document.createElement('canvas');
     c.width = dimg.width;
     c.height = dimg.height;
@@ -97,7 +107,7 @@ export async function loadPanoAssets(p: PanoSource): Promise<PanoAssets> {
  * 呼び出し側は GPU に送ったら releaseCanvas で捨てる。
  */
 export async function preparePanoCanvas(a: PanoAssets, purpose: 'view' | 'ar'): Promise<HTMLCanvasElement> {
-  const img = await decodeBlob(a.panorama);
+  const img = await decodeLabeled(a.panorama, 'パノラマ画像');
   const W = img.width, H = img.height;
   const canvas = document.createElement('canvas');
   canvas.width = W;
