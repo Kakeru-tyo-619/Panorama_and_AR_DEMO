@@ -3,10 +3,11 @@
  * 画像は数MBあるため、sessionStorage / localStorage ではなく IndexedDB に置く。
  */
 import { jstDateKey } from './time';
+import type { Draft } from '../screens/Generate';
 import type { CaptureLogRecord, ImageRecord, ImageVariant, PanoramaPost, PanoramaRecord, RawShots, ShotRecord } from './types';
 
 const DB_NAME = 'irisona-ar-panorama';
-const VERSION = 1;
+const VERSION = 2;
 const STORES = ['shots', 'panoramas', 'capture_logs', 'images', 'raw_shots'] as const;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -15,14 +16,18 @@ function open(): Promise<IDBDatabase> {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, VERSION);
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (e) => {
         const db = req.result;
-        const shots = db.createObjectStore('shots', { keyPath: 'id' });
-        shots.createIndex('user_id', 'user_id');
-        db.createObjectStore('panoramas', { keyPath: 'shot_id' });
-        db.createObjectStore('capture_logs', { keyPath: 'id' }).createIndex('shot_id', 'shot_id', { unique: true });
-        db.createObjectStore('images', { keyPath: 'url' });
-        db.createObjectStore('raw_shots', { keyPath: 'shot_id' });
+        if (e.oldVersion < 1) {
+          const shots = db.createObjectStore('shots', { keyPath: 'id' });
+          shots.createIndex('user_id', 'user_id');
+          db.createObjectStore('panoramas', { keyPath: 'shot_id' });
+          db.createObjectStore('capture_logs', { keyPath: 'id' }).createIndex('shot_id', 'shot_id', { unique: true });
+          db.createObjectStore('images', { keyPath: 'url' });
+          db.createObjectStore('raw_shots', { keyPath: 'shot_id' });
+        }
+        // v2：生成したけれどまだ投稿していない結果（下書き）。投稿・破棄で消す
+        if (e.oldVersion < 2) db.createObjectStore('drafts', { keyPath: 'shotId' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -46,7 +51,7 @@ function txDone(tx: IDBTransaction, aborted: () => Error | null): Promise<void> 
   });
 }
 
-async function store(name: (typeof STORES)[number], mode: IDBTransactionMode) {
+async function store(name: (typeof STORES)[number] | 'drafts', mode: IDBTransactionMode) {
   const db = await open();
   return db.transaction(name, mode).objectStore(name);
 }
@@ -171,4 +176,22 @@ export async function deletePost(id: string) {
     if (logReq.result != null) tx.objectStore('capture_logs').delete(logReq.result);
   };
   await done;
+}
+
+// ---- 下書き（生成結果を投稿前に一時保存する。投稿数には数えない） ----
+
+export async function saveDraft(d: Draft) {
+  await wrap((await store('drafts', 'readwrite')).put(d));
+}
+
+export async function getDraft(shotId: string): Promise<Draft | undefined> {
+  return wrap((await store('drafts', 'readonly')).get(shotId));
+}
+
+export async function listDrafts(): Promise<Draft[]> {
+  return wrap((await store('drafts', 'readonly')).getAll());
+}
+
+export async function deleteDraft(shotId: string) {
+  await wrap((await store('drafts', 'readwrite')).delete(shotId));
 }
