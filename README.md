@@ -37,7 +37,7 @@ npm ci
 npm run dev
 ```
 
-`http://localhost:5173/-Panorama_and_AR_DEMO/?mock=1` を開くと PC 用のモックモードで動きます（localhost は HTTPS でなくてもカメラ・センサー API が使えます）。
+`http://localhost:5173/Panorama_and_AR_DEMO/?mock=1` を開くと PC 用のモックモードで動きます（localhost は HTTPS でなくてもカメラ・センサー API が使えます）。
 
 ### スマホからローカルの開発サーバーを開く（HTTPS）
 
@@ -47,7 +47,7 @@ npm run dev
 npm run dev:https
 ```
 
-表示される `https://<PCのIP>:5173/-Panorama_and_AR_DEMO/` をスマホで開き、証明書の警告を許可して進みます。
+表示される `https://<PCのIP>:5173/Panorama_and_AR_DEMO/` をスマホで開き、証明書の警告を許可して進みます。
 iOS Safari は自己署名証明書だと方位センサーの許可ダイアログが出ないことがあるため、**実機確認は基本的に GitHub Pages の公開URLで行ってください。**
 
 ### 本番ビルドの確認
@@ -70,14 +70,14 @@ npm run preview
 2. リポジトリの **Settings → Pages** を開く
 3. **Build and deployment → Source** を **「GitHub Actions」** にする
 4. `main` に push（または Actions タブで「Deploy to GitHub Pages」を Run workflow）
-5. 完了すると公開URL **https://kakeru-tyo-619.github.io/-Panorama_and_AR_DEMO/** で公開される
+5. 完了すると公開URL **https://kakeru-tyo-619.github.io/Panorama_and_AR_DEMO/** で公開される
 
-`vite.config.ts` の `base` は、ワークフローが `VITE_BASE=/${{ github.event.repository.name }}/` を渡すので、**リポジトリ名に自動で合わせられます**（ローカルでの既定値も `/-Panorama_and_AR_DEMO/`）。
+`vite.config.ts` の `base` は、ワークフローが `VITE_BASE=/${{ github.event.repository.name }}/` を渡すので、**リポジトリ名に自動で合わせられます**（ローカルでの既定値も `/Panorama_and_AR_DEMO/`）。
 Worker・WASM などのファイルは Vite が `base` を前提に解決します。画面遷移は URL のパスを使わない（状態で切り替える）ので、下層パスの 404 は起きません。
 
 ## 3. スマホでの試し方
 
-1. 公開URL https://kakeru-tyo-619.github.io/-Panorama_and_AR_DEMO/ を iPhone（Safari 16.4 以上推奨）または Android（Chrome）で開く
+1. 公開URL https://kakeru-tyo-619.github.io/Panorama_and_AR_DEMO/ を iPhone（Safari 16.4 以上推奨）または Android（Chrome）で開く
 2. 「ログインして撮影する」で名前を入れてログイン →「撮影する」→「撮影開始」。カメラと方位センサー（iOS）の許可を求められるので許可する
 3. スマホを縦に持ち、その場でゆっくり一周する。上部の方位バーで撮影済みの区画が緑になり、矢印が次に向く方向を示す
    - 水平線が赤いときは前後に傾きすぎ（±10°）。速すぎる・傾きすぎると注意が出て、やり直し回数が増える
