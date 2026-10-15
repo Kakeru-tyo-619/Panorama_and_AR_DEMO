@@ -60,7 +60,7 @@ AR の表示を、データを作るところから画面に出すところま�
 | C1 | **`requestVideoFrameCallback` で映像のフレームに合わせて描く** | カメラ映像とパノラマの描画のタイミングがそろい、動かしたときの「遅れて付いてくる」感じが減る | 端末 | ○（iOS 15.4〜） | 小 | [caniuse](https://caniuse.com/wf-request-video-frame-callback)、[web.dev](https://web.dev/articles/requestvideoframecallback-rvfc?hl=en) |
 | C2 | **カメラ映像も WebGL に取り込み、1枚の画面で合成する** | 今は `<video>` の上に WebGL を重ねている。同じシェーダーで合成すれば、色合わせ（H）や境目の処理がカメラ映像側にもかけられる | 端末 | ○ | 中 | 一般的な手法 |
 | C3 | **ライト（torch）の制御** | 夜の撮影・AR で手元を照らせる。zoom・露出・ホワイトバランスの制御は iPhone では使えない見込み | 端末 | △（torch のみ） | 小 | [WebKit Bug 243075](https://bugs.webkit.org/show_bug.cgi?id=243075)、[Dynamsoft](https://www.dynamsoft.com/codepool/camera-zoom-control-on-web.html) |
-| C4 | **Worker でカメラのフレームを受け取る（MediaStreamTrackProcessor）** | E・F の画像処理を画面の描画から切り離せる | 端末 | △（Safari の正式対応は未確認） | 中 | [WebKit Bug 241124](https://bugs.webkit.org/show_bug.cgi?id=241124) |
+| C4 | **Worker でカメラのフレームを受け取る（MediaStreamTrackProcessor）** | E・F の画像処理を画面の描画から切り離せる | 端末 | ○（iOS 18〜） | 中 | [WebKit Bug 241124](https://bugs.webkit.org/show_bug.cgi?id=241124) |
 
 ## D. 向きの推定（センサー）
 
