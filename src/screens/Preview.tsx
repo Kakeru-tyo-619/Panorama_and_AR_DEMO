@@ -7,6 +7,7 @@ import { settings, useStore } from '../lib/store';
 import { classify, formatJst, toJstIso } from '../lib/time';
 import { uuid } from '../lib/types';
 import type { Draft } from './Generate';
+import { VerifySaveButton } from '../verify/VerifySaveButton';
 import { Viewer360 } from './Viewer360';
 
 const MIN_COVERAGE = 180; // 設計書：coverage_deg は 180〜360
@@ -162,6 +163,7 @@ export function Preview({ draft, onPosted, onRetake, onDiscard }: Props) {
       <button className="primary big" disabled={!canPost} onClick={post}>
         {busy ? '保存中…' : draft.kind === 'regen' ? '上書き保存' : '投稿する'}
       </button>
+      <VerifySaveButton draft={draft} />
       <div className="row-actions">
         {draft.kind === 'new' && <button className="ghost" disabled={busy} onClick={onRetake}>撮り直す</button>}
         <button
